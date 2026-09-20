@@ -18,7 +18,8 @@ const INITIAL_FILTERS = {
   station_id: '',
   date_from: '',
   date_to: '',
-  keyword: ''
+  keyword: '',
+  include_invalid: ''
 }
 
 export default function ExceedancesPage() {
@@ -88,9 +89,19 @@ export default function ExceedancesPage() {
 
       <SectionCard
         title="超标记录工作台"
-        hint="点击行可打开单条标注; 勾选多条后可批量确认或忽略"
+        hint="点击行可打开单条标注; 勾选多条后可批量确认或忽略。来自离群值 / 仪器异常读数的超标默认隐藏"
         actions={
           <>
+            <label className="checkbox" title="显示来自离群值 / 仪器异常读数的超标记录">
+              <input
+                type="checkbox"
+                checked={query.filters.include_invalid === true || query.filters.include_invalid === 'true'}
+                onChange={(event) =>
+                  query.setFilters({ ...query.filters, include_invalid: event.target.checked ? true : '' })
+                }
+              />
+              <span className="small">显示无效读数的超标</span>
+            </label>
             <Tag tone="primary">已选 {selected.length} 条</Tag>
             <button type="button" className="btn btn-sm" onClick={reload} disabled={query.loading}>
               刷新

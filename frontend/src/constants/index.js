@@ -12,6 +12,21 @@ export const STATION_STATUS_TONE = { active: 'success', maintenance: 'warning', 
 export const EXCEEDANCE_STATUS_TONE = { pending: 'warning', confirmed: 'danger', ignored: 'neutral' }
 export const EXCEEDANCE_LEVEL_TONE = { light: 'info', moderate: 'warning', severe: 'danger' }
 export const DATA_SOURCE_TONE = { manual: 'primary', device: 'info', import: 'neutral' }
+export const QUALITY_FLAG_TONE = { outlier: 'warning', instrument: 'danger', corrected: 'info' }
+
+export const QUALITY_FLAG_LABELS = { outlier: '离群值', instrument: '仪器异常', corrected: '人工修正' }
+export const QUALITY_INVALID_FLAGS = ['outlier', 'instrument']
+export const QUALITY_FLAG_OPTIONS = [
+  { value: 'outlier', label: '离群值', hint: '偏离相邻时段过大, 判定无效, 不计入达标率与排名' },
+  { value: 'instrument', label: '仪器异常', hint: '设备故障 / 校准期数据, 判定无效, 不计入达标率与排名' },
+  { value: 'corrected', label: '人工修正', hint: '保留修正前原值, 修正后的数据仍视为有效' }
+]
+export const QUALITY_STATE_OPTIONS = [
+  { value: 'valid', label: '仅有效数据' },
+  { value: 'invalid', label: '仅无效数据' },
+  { value: 'marked', label: '全部已标记' },
+  { value: 'unmarked', label: '仅未标记' }
+]
 
 export const EXCEEDANCE_LEVEL_LABELS = { light: '轻度超标', moderate: '中度超标', severe: '重度超标' }
 export const EXCEEDANCE_STATUS_LABELS = { pending: '待标注', confirmed: '已确认', ignored: '已忽略' }

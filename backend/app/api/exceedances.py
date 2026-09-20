@@ -1,7 +1,12 @@
 """超标记录标注 API."""
 from flask import Blueprint, current_app, request
 
-from ..domain.constants import EXCEEDANCE_LEVEL_LABELS, EXCEEDANCE_STATUS_LABELS, PERIOD_LABELS
+from ..domain.constants import (
+    EXCEEDANCE_LEVEL_LABELS,
+    EXCEEDANCE_STATUS_LABELS,
+    PERIOD_LABELS,
+    QUALITY_FLAG_LABELS,
+)
 from ..services import exceedance_service
 from ..utils.pagination import paginate_query
 from ..utils.validation import Validator
@@ -60,6 +65,8 @@ def export_exceedances():
         ("标注人", "annotator"),
         ("标注时间", lambda row: row.annotated_at.strftime("%Y-%m-%d %H:%M")
             if row.annotated_at else ""),
+        ("读数质量标记", lambda row: QUALITY_FLAG_LABELS.get(
+            row.measurement.quality_flag, "") if row.measurement and row.measurement.quality_flag else ""),
     ]
     return csv_response(rows, columns, "exceedance_records")
 

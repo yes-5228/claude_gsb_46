@@ -77,7 +77,7 @@ export default function StationDetailDrawer({ stationId, onClose, onEdit }) {
               <div className="stat-value">{stats.measurement_count ?? 0}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">超标记录</div>
+              <div className="stat-label">超标记录 (有效口径)</div>
               <div className="stat-value danger-text">{stats.exceeded_count ?? 0}</div>
             </div>
             <div className="stat-card">
@@ -85,6 +85,13 @@ export default function StationDetailDrawer({ stationId, onClose, onEdit }) {
               <div className="stat-value" style={{ color: 'var(--warning)' }}>
                 {stats.pending_count ?? 0}
               </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">无效数据 (已剔除)</div>
+              <div className="stat-value" style={{ color: stats.invalid_count ? 'var(--text-muted)' : undefined }}>
+                {stats.invalid_count ?? 0}
+              </div>
+              <div className="stat-foot">离群值 / 仪器异常, 明细可查</div>
             </div>
           </div>
           <div className="card">

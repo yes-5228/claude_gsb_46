@@ -167,6 +167,17 @@ table.data-table td { padding: 10px 12px; border-bottom: 1px solid #eef2f7; vert
 table.data-table tbody tr:hover { background: #fafbff; }
 table.data-table tbody tr.selected { background: var(--primary-soft); }
 table.data-table tbody tr.clickable { cursor: pointer; }
+table.data-table tbody tr.row-invalid { background: #f4f5f7; color: #94a3b8; }
+table.data-table tbody tr.row-invalid:hover { background: #eceef2; }
+table.data-table tbody tr.row-invalid td .danger-text { color: #b0b6c0 !important; }
+.rank-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 999px;
+  background: #eef2f7; color: #475569; font-size: 12px; font-weight: 600;
+}
+.rank-badge.rank-1 { background: #fef3c7; color: #b45309; }
+.rank-badge.rank-2 { background: #e2e8f0; color: #475569; }
+.rank-badge.rank-3 { background: #fde2d0; color: #b45309; }
 .cell-nowrap { white-space: nowrap; }
 .table-caption { padding: 12px 18px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 

@@ -1,5 +1,11 @@
 """监测数据记录."""
-from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS, label_of
+from ..domain.constants import (
+    DATA_SOURCE_LABELS,
+    PERIOD_LABELS,
+    QUALITY_FLAG_LABELS,
+    QUALITY_FLAG_INVALID,
+    label_of,
+)
 from ..domain.standards import get_pollutant
 from ..extensions import db
 from .base import TimestampMixin, iso
@@ -30,6 +36,14 @@ class Measurement(TimestampMixin, db.Model):
     recorder = db.Column(db.String(64))
     remark = db.Column(db.Text)
 
+    # ---- 数据质量标记 (留痕: 标记原因 / 标记人 / 标记时间) ----
+    quality_flag = db.Column(db.String(16), index=True)
+    quality_reason = db.Column(db.Text)
+    quality_marked_by = db.Column(db.String(64))
+    quality_marked_at = db.Column(db.DateTime)
+    # 人工修正前的原始读数, 仅 quality_flag='corrected' 时使用
+    original_value = db.Column(db.Float)
+
     station = db.relationship("Station", back_populates="measurements")
     exceedance = db.relationship(
         "Exceedance",
@@ -39,9 +53,22 @@ class Measurement(TimestampMixin, db.Model):
         passive_deletes=True,
     )
 
+    @property
+    def is_quality_invalid(self):
+        """离群值 / 仪器异常 的读数视为无效, 不计入达标率与排名."""
+        return self.quality_flag in QUALITY_FLAG_INVALID
+
     def pollutant_label(self):
         meta = get_pollutant(self.pollutant)
         return meta["label"] if meta else self.pollutant
+
+    def clear_quality(self):
+        """Clear the current quality mark (the history log is kept separately)."""
+        self.quality_flag = None
+        self.quality_reason = None
+        self.quality_marked_by = None
+        self.quality_marked_at = None
+        self.original_value = None
 
     def to_dict(self, include_station=False):
         payload = {
@@ -61,6 +88,14 @@ class Measurement(TimestampMixin, db.Model):
             "data_source_label": label_of(DATA_SOURCE_LABELS, self.data_source),
             "recorder": self.recorder,
             "remark": self.remark,
+            "quality_flag": self.quality_flag,
+            "quality_flag_label": label_of(QUALITY_FLAG_LABELS, self.quality_flag)
+            if self.quality_flag else None,
+            "quality_reason": self.quality_reason,
+            "quality_marked_by": self.quality_marked_by,
+            "quality_marked_at": iso(self.quality_marked_at),
+            "original_value": self.original_value,
+            "is_quality_invalid": self.is_quality_invalid,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
             "exceedance_id": self.exceedance.id if self.exceedance else None,

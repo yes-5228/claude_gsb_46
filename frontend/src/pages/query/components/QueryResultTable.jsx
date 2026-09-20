@@ -1,9 +1,10 @@
 import DataTable from '../../../components/common/DataTable.jsx'
 import Tag from '../../../components/common/Tag.jsx'
+import QualityFlagTag from '../../../components/common/QualityFlagTag.jsx'
 import { DATA_SOURCE_TONE, EXCEEDANCE_STATUS_TONE } from '../../../constants/index.js'
 import { formatDateTime, formatNumber } from '../../../utils/format.js'
 
-export default function QueryResultTable({ rows, loading }) {
+export default function QueryResultTable({ rows, loading, onMarkQuality }) {
   const columns = [
     { key: 'measured_at', title: '监测时间', className: 'cell-nowrap', render: (row) => formatDateTime(row.measured_at) },
     { key: 'station', title: '监测点', render: (row) => `${row.station?.code || ''} ${row.station?.name || ''}` },
@@ -17,6 +18,9 @@ export default function QueryResultTable({ rows, loading }) {
       render: (row) => (
         <span className={row.is_exceeded ? 'danger-text strong' : ''}>
           {formatNumber(row.value)} <span className="muted small">{row.unit}</span>
+          {row.original_value !== null && row.original_value !== undefined ? (
+            <div className="small muted">原值 {formatNumber(row.original_value)}</div>
+          ) : null}
         </span>
       )
     },
@@ -39,11 +43,28 @@ export default function QueryResultTable({ rows, loading }) {
         )
     },
     {
+      key: 'quality_flag',
+      title: '质量标记',
+      render: (row) => (
+        <QualityFlagTag flag={row.quality_flag} label={row.quality_flag_label} invalid={row.is_quality_invalid} />
+      )
+    },
+    {
       key: 'data_source_label',
       title: '来源',
       render: (row) => <Tag tone={DATA_SOURCE_TONE[row.data_source]}>{row.data_source_label}</Tag>
     },
-    { key: 'recorder', title: '录入人', render: (row) => row.recorder || '-' }
+    { key: 'recorder', title: '录入人', render: (row) => row.recorder || '-' },
+    {
+      key: 'actions',
+      title: '操作',
+      align: 'right',
+      render: (row) => (
+        <button type="button" className="btn btn-sm" onClick={() => onMarkQuality?.(row)}>
+          质量标记
+        </button>
+      )
+    }
   ]
 
   return (
@@ -53,6 +74,7 @@ export default function QueryResultTable({ rows, loading }) {
       loading={loading}
       emptyText="没有符合条件的数据, 请调整筛选条件"
       emptyIcon="🔍"
+      rowClassName={(row) => (row.is_quality_invalid ? 'row-invalid' : '')}
     />
   )
 }

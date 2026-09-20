@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FilterPanel } from '../../../components/common/Card.jsx'
 import { Field, Input, Select } from '../../../components/common/FormField.jsx'
+import { QUALITY_FLAG_OPTIONS, QUALITY_STATE_OPTIONS } from '../../../constants/index.js'
 import { usePollutantMeta, useStationOptions } from '../../../hooks/useOptions.js'
 
 const PERIODS = [
@@ -25,6 +26,13 @@ const SOURCE_OPTIONS = [
   { value: 'import', label: '历史导入' }
 ]
 
+const EMPTY_FILTERS = {
+  keyword: '', station_id: '', area: '', pollutant: '', period: '',
+  is_exceeded: '', exceedance_status: '', data_source: '',
+  quality_state: '', quality_flag: '', include_invalid: '',
+  date_from: '', date_to: '', min_value: '', max_value: ''
+}
+
 export default function QueryFilters({ value, loading, onSubmit, onReset }) {
   const [draft, setDraft] = useState(value)
   const { data: stationData } = useStationOptions()
@@ -41,11 +49,7 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
       loading={loading}
       onSearch={() => onSubmit(draft)}
       onReset={() => {
-        setDraft({
-          keyword: '', station_id: '', area: '', pollutant: '', period: '',
-          is_exceeded: '', exceedance_status: '', data_source: '',
-          date_from: '', date_to: '', min_value: '', max_value: ''
-        })
+        setDraft(EMPTY_FILTERS)
         onReset()
       }}
     >
@@ -97,6 +101,22 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
       </Field>
       <Field label="数据来源">
         <Select value={draft.data_source || ''} onChange={update('data_source')} placeholder="全部来源" options={SOURCE_OPTIONS} />
+      </Field>
+      <Field label="数据质量">
+        <Select
+          value={draft.quality_state || ''}
+          onChange={update('quality_state')}
+          placeholder="全部 (明细含无效数据)"
+          options={QUALITY_STATE_OPTIONS}
+        />
+      </Field>
+      <Field label="标记类型">
+        <Select
+          value={draft.quality_flag || ''}
+          onChange={update('quality_flag')}
+          placeholder="全部标记"
+          options={QUALITY_FLAG_OPTIONS}
+        />
       </Field>
       <Field label="开始日期">
         <Input type="date" value={draft.date_from || ''} onChange={update('date_from')} />

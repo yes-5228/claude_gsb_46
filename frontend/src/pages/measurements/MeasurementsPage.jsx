@@ -16,12 +16,16 @@ import EntryForm from './components/EntryForm.jsx'
 import EntryResultPanel from './components/EntryResultPanel.jsx'
 import MeasurementFilters from './components/MeasurementFilters.jsx'
 import MeasurementTable from './components/MeasurementTable.jsx'
+import QualityFlagModal from './components/QualityFlagModal.jsx'
+import QualityLogsModal from './components/QualityLogsModal.jsx'
 
 const INITIAL_FILTERS = {
   station_id: '',
   pollutant: '',
   period: '',
   is_exceeded: '',
+  quality_state: '',
+  quality_flag: '',
   date_from: '',
   date_to: ''
 }
@@ -33,6 +37,8 @@ export default function MeasurementsPage() {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [qualityTarget, setQualityTarget] = useState(null)
+  const [logsOpen, setLogsOpen] = useState(false)
 
   const handleSubmitted = useCallback(
     (payload) => {
@@ -91,9 +97,12 @@ export default function MeasurementsPage() {
 
       <SectionCard
         title="最近录入的数据"
-        hint="按监测时间倒序展示, 便于核对刚提交的记录"
+        hint="离群值 / 仪器异常 的读数在行内置灰, 默认不影响达标率与排名, 但明细保留可查"
         actions={
           <>
+            <button type="button" className="btn btn-sm" onClick={() => setLogsOpen(true)}>
+              质量标记留痕
+            </button>
             <button type="button" className="btn btn-sm" onClick={query.reload} disabled={query.loading}>
               刷新
             </button>
@@ -107,6 +116,7 @@ export default function MeasurementsPage() {
           rows={query.items}
           loading={query.loading}
           onDelete={(row) => setPendingDelete(row)}
+          onMarkQuality={(row) => setQualityTarget(row.id)}
         />
         <Pagination
           page={query.page}
@@ -129,6 +139,15 @@ export default function MeasurementsPage() {
         onConfirm={handleDelete}
         onCancel={() => setPendingDelete(null)}
       />
+
+      {qualityTarget ? (
+        <QualityFlagModal
+          measurementId={qualityTarget}
+          onClose={() => setQualityTarget(null)}
+          onSaved={query.reload}
+        />
+      ) : null}
+      <QualityLogsModal open={logsOpen} onClose={() => setLogsOpen(false)} />
     </>
   )
 }

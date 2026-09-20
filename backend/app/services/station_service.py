@@ -1,10 +1,18 @@
 """监测点台账业务逻辑."""
 from sqlalchemy import cast, func, or_
 
-from ..domain.constants import STATION_STATUS_LABELS, STATION_TYPE_LABELS
+from ..domain.constants import QUALITY_FLAG_INVALID, STATION_STATUS_LABELS, STATION_TYPE_LABELS
 from ..errors import ConflictError, NotFoundError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
+
+
+def _valid_only(query):
+    """Filter excluding readings marked 离群值 / 仪器异常."""
+    return query.filter(
+        or_(Measurement.quality_flag.is_(None),
+            Measurement.quality_flag.notin_(tuple(QUALITY_FLAG_INVALID)))
+    )
 
 
 def _split(value):
@@ -80,7 +88,11 @@ def delete_station(station):
 
 
 def stats_map(station_ids):
-    """Aggregated counters for a page of stations."""
+    """Aggregated counters for a page of stations.
+
+    超标计数按有效数据口径 (剔除离群值 / 仪器异常); 无效读数单独计数,
+    原始数据量仍全部保留, 便于在明细中追溯。
+    """
     if not station_ids:
         return {}
     measurements = dict(
@@ -89,15 +101,31 @@ def stats_map(station_ids):
         .group_by(Measurement.station_id)
         .all()
     )
-    exceeded = dict(
+    invalid = dict(
         db.session.query(Measurement.station_id, func.count(Measurement.id))
+        .filter(
+            Measurement.station_id.in_(station_ids),
+            Measurement.quality_flag.in_(tuple(QUALITY_FLAG_INVALID)),
+        )
+        .group_by(Measurement.station_id)
+        .all()
+    )
+    exceeded = dict(
+        _valid_only(db.session.query(Measurement))
+        .with_entities(Measurement.station_id, func.count(Measurement.id))
         .filter(Measurement.station_id.in_(station_ids), Measurement.is_exceeded.is_(True))
         .group_by(Measurement.station_id)
         .all()
     )
     pending = dict(
         db.session.query(Exceedance.station_id, func.count(Exceedance.id))
-        .filter(Exceedance.station_id.in_(station_ids), Exceedance.status == "pending")
+        .outerjoin(Measurement, Exceedance.measurement_id == Measurement.id)
+        .filter(
+            Exceedance.station_id.in_(station_ids),
+            Exceedance.status == "pending",
+            or_(Measurement.quality_flag.is_(None),
+                Measurement.quality_flag.notin_(tuple(QUALITY_FLAG_INVALID))),
+        )
         .group_by(Exceedance.station_id)
         .all()
     )
@@ -114,6 +142,7 @@ def stats_map(station_ids):
             "measurement_count": int(measurements.get(station_id, 0)),
             "exceeded_count": int(exceeded.get(station_id, 0)),
             "pending_count": int(pending.get(station_id, 0)),
+            "invalid_count": int(invalid.get(station_id, 0)),
             "last_measured_at": iso(last_seen.get(station_id)),
         }
         for station_id in station_ids
@@ -123,7 +152,8 @@ def stats_map(station_ids):
 def detail_stats(station):
     """Per-pollutant counters for the station detail drawer."""
     rows = (
-        db.session.query(
+        _valid_only(db.session.query(Measurement))
+        .with_entities(
             Measurement.pollutant,
             func.count(Measurement.id),
             func.sum(cast(Measurement.is_exceeded, db.Integer)),

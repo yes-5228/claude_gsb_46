@@ -125,7 +125,7 @@ def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
                 totals["exceedances"] += result["summary"]["exceeded_count"]
 
     # 标注一部分超标记录, 让工作台同时存在待办与已处理记录
-    from .services import exceedance_service
+    from .services import exceedance_service, quality_service
 
     exceedances = Exceedance.query.order_by(Exceedance.id.asc()).all()
     annotated = 0
@@ -144,6 +144,42 @@ def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
             )
         annotated += 1
     totals["annotated"] = annotated
+
+    # 演示数据质量标记: 少量离群值 / 仪器异常 / 人工修正, 覆盖留痕与统计剔除场景
+    quality_marks = {"outlier": 0, "instrument": 0, "corrected": 0}
+    sample = Measurement.query.order_by(Measurement.id.asc()).all()
+    for offset, flag in (
+        (17, "outlier"),
+        (53, "instrument"),
+        (97, "corrected"),
+        (151, "outlier"),
+        (211, "instrument"),
+    ):
+        if offset >= len(sample):
+            continue
+        record = sample[offset]
+        marker = rng.choice(recorder_pool)
+        if flag == "outlier":
+            quality_service.mark(
+                record, flag="outlier",
+                reason="该读数与相邻时段偏差超过 3 倍标准差, 经复核判定为离群值",
+                marked_by=marker,
+            )
+        elif flag == "instrument":
+            quality_service.mark(
+                record, flag="instrument",
+                reason="监测仪当时处于故障报警状态, 读数不可信, 待运维检修",
+                marked_by=marker,
+            )
+        else:
+            quality_service.mark(
+                record, flag="corrected",
+                reason="原始上传值明显异常, 已按现场人工比对值修正",
+                marked_by=marker,
+                corrected_value=round(float(record.value) * 0.5, 2),
+            )
+        quality_marks[flag] += 1
+    totals["quality_marks"] = sum(quality_marks.values())
     return totals
 
 

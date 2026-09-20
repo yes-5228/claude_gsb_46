@@ -3,6 +3,7 @@ from ..domain.constants import (
     EXCEEDANCE_LEVEL_LABELS,
     EXCEEDANCE_STATUS_LABELS,
     PERIOD_LABELS,
+    QUALITY_FLAG_LABELS,
     label_of,
 )
 from ..extensions import db
@@ -62,6 +63,13 @@ class Exceedance(TimestampMixin, db.Model):
             "station_name": self.station.name if self.station else None,
             "station_code": self.station.code if self.station else None,
             "unit": self.measurement.unit if self.measurement else None,
+            "measurement_quality_flag": (
+                self.measurement.quality_flag if self.measurement else None
+            ),
+            "measurement_quality_label": (
+                label_of(QUALITY_FLAG_LABELS, self.measurement.quality_flag)
+                if self.measurement and self.measurement.quality_flag else None
+            ),
         }
         if include_relations and self.measurement:
             payload["measurement"] = self.measurement.to_dict(include_station=True)

@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import cast, func, or_
 
-from ..domain.constants import EXCEEDANCE_LEVEL_LABELS, EXCEEDANCE_STATUS_LABELS
+from ..domain.constants import EXCEEDANCE_LEVEL_LABELS, EXCEEDANCE_STATUS_LABELS, QUALITY_FLAG_INVALID
 from ..errors import NotFoundError, ValidationError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
@@ -29,6 +29,13 @@ def _int_list(args, name):
     return values
 
 
+def _bool_arg(args, name):
+    raw = args.get(name)
+    if raw in (None, ""):
+        return None
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _date_arg(args, name, end_of_day=False):
     from datetime import time
 
@@ -50,6 +57,14 @@ def get_exceedance(exceedance_id):
 
 def exceedance_query(args):
     query = db.session.query(Exceedance).join(Station, Exceedance.station_id == Station.id)
+
+    # 来自无效读数 (离群值 / 仪器异常) 的超标记录默认不参与待办与排名,
+    # 传 include_invalid=true 可在明细中一并查出
+    if _bool_arg(args, "include_invalid") is not True:
+        query = query.outerjoin(Measurement, Exceedance.measurement_id == Measurement.id).filter(
+            or_(Measurement.quality_flag.is_(None),
+                Measurement.quality_flag.notin_(tuple(QUALITY_FLAG_INVALID)))
+        )
 
     statuses = _split(args.get("status"))
     if statuses:

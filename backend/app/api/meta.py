@@ -62,6 +62,7 @@ def overview():
         "date_from": (today - timedelta(days=6)).isoformat(),
     }
     trend = query_service.statistics(trend_args)
+    # 概览统计默认剔除被标为无效的读数 (离群值 / 仪器异常)
     filters = query_service.parse_filters({})
 
     pending_args = {"status": "pending"}
@@ -75,8 +76,7 @@ def overview():
         "measurements": query_service.summary(filters),
         "exceedances": exceedance_service.summary({}),
         "pending_exceedances": [record.to_dict() for record in pending_records],
-        "trend": trend,
-        "labels": {
+        "trend": trend,        "labels": {
             "station_status": STATION_STATUS_LABELS,
             "station_type": STATION_TYPE_LABELS,
             "exceedance_status": EXCEEDANCE_STATUS_LABELS,

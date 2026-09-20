@@ -18,6 +18,15 @@ EXCEEDANCE_LEVEL_LABELS = {"light": "轻度超标", "moderate": "中度超标", 
 
 EXCEEDANCE_STATUS_LABELS = {"pending": "待标注", "confirmed": "已确认", "ignored": "已忽略"}
 
+# 数据质量标记: outlier / instrument 视为无效, corrected 修正后仍有效
+QUALITY_FLAG_LABELS = {
+    "outlier": "离群值",
+    "instrument": "仪器异常",
+    "corrected": "人工修正",
+}
+
+QUALITY_FLAG_INVALID = {"outlier", "instrument"}
+
 
 def as_options(label_map):
     return [{"value": key, "label": label} for key, label in label_map.items()]
@@ -31,6 +40,10 @@ def options_payload():
         "data_source": as_options(DATA_SOURCE_LABELS),
         "exceedance_level": as_options(EXCEEDANCE_LEVEL_LABELS),
         "exceedance_status": as_options(EXCEEDANCE_STATUS_LABELS),
+        "quality_flag": [
+            {"value": key, "label": label, "invalid": key in QUALITY_FLAG_INVALID}
+            for key, label in QUALITY_FLAG_LABELS.items()
+        ],
     }
 
 

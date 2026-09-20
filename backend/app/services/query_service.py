@@ -7,6 +7,8 @@ from ..domain.constants import (
     DATA_SOURCE_LABELS,
     EXCEEDANCE_STATUS_LABELS,
     PERIOD_LABELS,
+    QUALITY_FLAG_INVALID,
+    QUALITY_FLAG_LABELS,
     STATION_TYPE_LABELS,
 )
 from ..domain.standards import POLLUTANT_CODES, get_pollutant
@@ -76,6 +78,19 @@ def parse_filters(args):
         if period not in PERIOD_LABELS:
             raise ValidationError("未知数据周期: %s" % period, fields={"period": "unknown"})
 
+    quality_flags = _split(args.get("quality_flag"))
+    for flag in quality_flags:
+        if flag not in QUALITY_FLAG_LABELS:
+            raise ValidationError(
+                "未知质量标记: %s" % flag, fields={"quality_flag": "unknown"}
+            )
+    quality_state = (args.get("quality_state") or "").strip()
+    if quality_state and quality_state not in ("valid", "invalid", "marked", "unmarked"):
+        raise ValidationError(
+            "quality_state 仅支持: valid / invalid / marked / unmarked",
+            fields={"quality_state": "unknown"},
+        )
+
     filters = {
         "station_ids": _int_list(args, "station_id"),
         "areas": _split(args.get("area")),
@@ -85,6 +100,9 @@ def parse_filters(args):
         "data_sources": _split(args.get("data_source")),
         "is_exceeded": _bool_arg(args, "is_exceeded"),
         "exceedance_status": _split(args.get("exceedance_status")),
+        "quality_flags": quality_flags,
+        "quality_state": quality_state or None,
+        "include_invalid": _bool_arg(args, "include_invalid") is True,
         "date_from": _date_arg(args, "date_from"),
         "date_to": _date_arg(args, "date_to", end_of_day=True),
         "min_value": _float_arg(args, "min_value"),
@@ -121,6 +139,21 @@ def apply_filters(query, filters):
         query = query.filter(Measurement.data_source.in_(filters["data_sources"]))
     if filters["is_exceeded"] is not None:
         query = query.filter(Measurement.is_exceeded.is_(filters["is_exceeded"]))
+    if filters["quality_flags"]:
+        query = query.filter(Measurement.quality_flag.in_(filters["quality_flags"]))
+    if filters.get("quality_state"):
+        state = filters["quality_state"]
+        if state == "valid":
+            query = query.filter(
+                or_(Measurement.quality_flag.is_(None),
+                    Measurement.quality_flag.notin_(tuple(QUALITY_FLAG_INVALID)))
+            )
+        elif state == "invalid":
+            query = query.filter(Measurement.quality_flag.in_(tuple(QUALITY_FLAG_INVALID)))
+        elif state == "marked":
+            query = query.filter(Measurement.quality_flag.isnot(None))
+        else:  # unmarked
+            query = query.filter(Measurement.quality_flag.is_(None))
     if filters["date_from"]:
         query = query.filter(Measurement.measured_at >= filters["date_from"])
     if filters["date_to"]:
@@ -143,6 +176,35 @@ def apply_filters(query, filters):
     return query
 
 
+def exclude_invalid(query):
+    """Filter out readings marked as 离群值 / 仪器异常 (used by statistics & ranking)."""
+    return query.filter(
+        or_(Measurement.quality_flag.is_(None),
+            Measurement.quality_flag.notin_(tuple(QUALITY_FLAG_INVALID)))
+    )
+
+
+def _effective_filters(args):
+    """Filters for aggregation: invalid readings are excluded unless explicitly requested."""
+    filters = parse_filters(args)
+    invalid_requested = bool(filters["quality_flags"]) and set(filters["quality_flags"]) <= QUALITY_FLAG_INVALID
+    if not filters["include_invalid"] and not invalid_requested and filters["quality_state"] != "invalid":
+        filters["_drop_invalid"] = True
+    else:
+        filters["_drop_invalid"] = False
+    return filters
+
+
+def _aggregate_query(filters):
+    def builder(*entities):
+        query = db.session.query(*entities)
+        query = apply_filters(query, filters)
+        if filters.get("_drop_invalid"):
+            query = exclude_invalid(query)
+        return query
+    return builder
+
+
 def apply_sort(query, sort=None, order="desc"):
     sort = sort if sort in SORT_CHOICES else "measured_at"
     column = {
@@ -163,8 +225,44 @@ def measurement_query(args):
     return apply_sort(query, args.get("sort"), args.get("order")), filters
 
 
-def summary(filters):
-    """Aggregate counters shown above the query result table."""
+def _quality_counts(filters):
+    """Count flagged / invalid / corrected readings within the filter scope."""
+    base = apply_filters(db.session.query(Measurement), filters)
+    rows = (
+        base.with_entities(Measurement.quality_flag, func.count(Measurement.id))
+        .filter(Measurement.quality_flag.isnot(None))
+        .group_by(Measurement.quality_flag)
+        .all()
+    )
+    by_flag = {flag: int(count) for flag, count in rows}
+    invalid_count = sum(by_flag.get(flag, 0) for flag in QUALITY_FLAG_INVALID)
+    return {
+        "by_flag": [
+            {"key": flag, "label": QUALITY_FLAG_LABELS[flag], "count": by_flag.get(flag, 0)}
+            for flag in QUALITY_FLAG_LABELS
+        ],
+        "marked_count": sum(by_flag.values()),
+        "invalid_count": invalid_count,
+        "corrected_count": by_flag.get("corrected", 0),
+    }
+
+
+def summary(filters, exclude_invalid_data=None):
+    """Aggregate counters shown above the query result table.
+
+    Invalid readings (离群值 / 仪器异常) are excluded from the rate calculations;
+    the raw counts are returned separately under ``quality`` so the UI can show
+    both 全部 and 有效数据 口径.
+    """
+    if exclude_invalid_data is None:
+        # 默认统计口径剔除无效数据; 显式 include_invalid=true 或筛选无效数据时保留
+        invalid_requested = bool(filters["quality_flags"]) and set(
+            filters["quality_flags"]) <= QUALITY_FLAG_INVALID
+        exclude_invalid_data = (
+            not filters["include_invalid"]
+            and not invalid_requested
+            and filters.get("quality_state") != "invalid"
+        )
     query = apply_filters(
         db.session.query(
             func.count(Measurement.id),
@@ -176,17 +274,37 @@ def summary(filters):
         ),
         filters,
     )
+    if exclude_invalid_data:
+        query = exclude_invalid(query)
     total, exceeded, stations, first_at, last_at, avg_value = query.one()
     total = int(total or 0)
     exceeded = int(exceeded or 0)
+
+    # 原始口径 (含无效读数), 供概览/卡片展示"有效 X / 全部 Y"
+    raw_row = apply_filters(
+        db.session.query(
+            func.count(Measurement.id),
+            func.sum(cast(Measurement.is_exceeded, db.Integer)),
+        ),
+        filters,
+    ).one()
+    raw_total = int(raw_row[0] or 0)
+    raw_exceeded = int(raw_row[1] or 0)
+
     return {
         "total": total,
         "exceeded_count": exceeded,
+        "compliance_count": total - exceeded,
         "exceed_rate": round(exceeded / total, 4) if total else 0.0,
+        "compliance_rate": round((total - exceeded) / total, 4) if total else 0.0,
+        "raw_total": raw_total,
+        "raw_exceeded_count": raw_exceeded,
         "station_count": int(stations or 0),
         "first_measured_at": iso(first_at),
         "last_measured_at": iso(last_at),
         "avg_value": round(float(avg_value), 2) if avg_value is not None else None,
+        "invalid_excluded": exclude_invalid_data,
+        "quality": _quality_counts(filters),
     }
 
 
@@ -201,8 +319,13 @@ def _metric_expression(metric):
 
 
 def statistics(args):
-    """Grouped aggregation used by the query page statistics panel."""
-    filters = parse_filters(args)
+    """Grouped aggregation used by the query page statistics panel.
+
+    Invalid readings (离群值 / 仪器异常) are excluded by default; pass
+    ``include_invalid=true`` to compute on the raw data. Grouping by station
+    yields the compliance ranking (sorted by compliance rate).
+    """
+    filters = _effective_filters(args)
     group_by = args.get("group_by") or "pollutant"
     metric = args.get("metric") or "avg"
     if group_by not in GROUP_BY_CHOICES:
@@ -214,12 +337,13 @@ def statistics(args):
             "metric 仅支持: %s" % ", ".join(METRIC_CHOICES), fields={"metric": "unknown"}
         )
 
+    build = _aggregate_query(filters)
     value_expr = _metric_expression(metric).label("metric_value")
     count_expr = func.count(Measurement.id).label("row_count")
     exceeded_expr = func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count")
 
     if group_by == "station":
-        query = db.session.query(
+        query = build(
             Station.id.label("station_id"),
             Station.code.label("station_code"),
             Station.name.label("station_name"),
@@ -230,18 +354,18 @@ def statistics(args):
         ).group_by(Station.id, Station.code, Station.name, Station.area)
         is_time_group = False
     elif group_by == "area":
-        query = db.session.query(
+        query = build(
             Station.area.label("area"), value_expr, count_expr, exceeded_expr
         ).group_by(Station.area)
         is_time_group = False
     elif group_by == "day":
         bucket = func.date(Measurement.measured_at).label("bucket")
-        query = db.session.query(bucket, value_expr, count_expr, exceeded_expr).group_by(bucket)
+        query = build(bucket, value_expr, count_expr, exceeded_expr).group_by(bucket)
         is_time_group = True
     elif group_by == "month":
         year = func.extract("year", Measurement.measured_at).label("year")
         month = func.extract("month", Measurement.measured_at).label("month")
-        query = db.session.query(year, month, value_expr, count_expr, exceeded_expr).group_by(
+        query = build(year, month, value_expr, count_expr, exceeded_expr).group_by(
             year, month
         )
         is_time_group = True
@@ -251,12 +375,11 @@ def statistics(args):
             "period": Measurement.period,
             "data_source": Measurement.data_source,
         }[group_by]
-        query = db.session.query(
+        query = build(
             column.label("bucket"), value_expr, count_expr, exceeded_expr
         ).group_by(column)
         is_time_group = False
 
-    query = apply_filters(query, filters)
     rows = query.all()
 
     items = []
@@ -294,18 +417,26 @@ def statistics(args):
                 "value": round(float(raw_value), 2) if raw_value is not None else None,
                 "count": count,
                 "exceeded_count": exceeded,
+                "compliance_count": count - exceeded,
                 "exceed_rate": round(exceeded / count, 4) if count else 0.0,
+                "compliance_rate": round((count - exceeded) / count, 4) if count else 0.0,
             }
         )
 
     if is_time_group:
         items.sort(key=lambda item: item["key"])
+    elif group_by == "station":
+        # 站点分组即达标率排名: 达标率高者靠前, 达标率相同数据量多者靠前
+        items.sort(key=lambda item: (-item["compliance_rate"], -item["count"]))
+        for index, item in enumerate(items, start=1):
+            item["rank"] = index
     else:
         items.sort(key=lambda item: (item["value"] is None, -(item["value"] or 0)))
 
     return {
         "group_by": group_by,
         "metric": metric,
+        "invalid_excluded": filters["_drop_invalid"],
         "items": items,
         "totals": {
             "count": sum(item["count"] for item in items),
@@ -324,5 +455,8 @@ def option_payload():
         ],
         "station_type": [
             {"value": key, "label": label} for key, label in STATION_TYPE_LABELS.items()
+        ],
+        "quality_flag": [
+            {"value": key, "label": label} for key, label in QUALITY_FLAG_LABELS.items()
         ],
     }

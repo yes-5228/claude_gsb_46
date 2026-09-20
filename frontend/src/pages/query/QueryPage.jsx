@@ -10,6 +10,7 @@ import { useAsyncData } from '../../hooks/useAsyncData.js'
 import { useListQuery } from '../../hooks/useListQuery.js'
 import { saveBlob } from '../../utils/download.js'
 import { formatDateTime, formatNumber, formatPercent } from '../../utils/format.js'
+import QualityFlagModal from '../measurements/components/QualityFlagModal.jsx'
 import QueryFilters from './components/QueryFilters.jsx'
 import QueryResultTable from './components/QueryResultTable.jsx'
 import StatisticsPanel from './components/StatisticsPanel.jsx'
@@ -23,6 +24,9 @@ const INITIAL_FILTERS = {
   is_exceeded: '',
   exceedance_status: '',
   data_source: '',
+  quality_state: '',
+  quality_flag: '',
+  include_invalid: '',
   date_from: '',
   date_to: '',
   min_value: '',
@@ -34,6 +38,7 @@ export default function QueryPage() {
   const query = useListQuery(queryMeasurements, INITIAL_FILTERS, { pageSize: 20 })
   const [statsParams, setStatsParams] = useState({ group_by: 'pollutant', metric: 'avg' })
   const [exporting, setExporting] = useState(false)
+  const [qualityTarget, setQualityTarget] = useState(null)
 
   const statsLoader = useCallback(
     () => queryStatistics({ ...query.filters, ...statsParams }),
@@ -61,6 +66,8 @@ export default function QueryPage() {
     }
   }
 
+  const invalidCount = summary?.quality?.invalid_count ?? 0
+
   return (
     <>
       <QueryFilters
@@ -73,19 +80,32 @@ export default function QueryPage() {
       {query.error ? <Alert tone="error">{query.error.message}</Alert> : null}
 
       <div className="stat-grid">
-        <StatCard label="符合条件的数据量" value={summary ? summary.total : '-'} foot={summary ? `涉及 ${summary.station_count} 个监测点` : ''} />
+        <StatCard
+          label={summary?.invalid_excluded ? '有效数据量' : '符合条件的数据量'}
+          value={summary ? summary.total : '-'}
+          foot={summary ? `涉及 ${summary.station_count} 个监测点` : ''}
+        />
         <StatCard
           label="超标记录"
           value={summary ? summary.exceeded_count : '-'}
           tone={summary?.exceeded_count ? 'danger' : undefined}
           foot={summary ? `超标率 ${formatPercent(summary.exceed_rate)}` : ''}
         />
-        <StatCard label="平均浓度" value={summary ? formatNumber(summary.avg_value) : '-'} foot="按当前筛选范围计算" />
         <StatCard
-          label="时间范围"
-          value={summary ? formatDateTime(summary.first_measured_at).slice(5, 10) : '-'}
-          unit={summary ? `~ ${formatDateTime(summary.last_measured_at).slice(5, 10)}` : ''}
-          foot={summary ? `${formatDateTime(summary.first_measured_at)} ~ ${formatDateTime(summary.last_measured_at)}` : ''}
+          label="达标率"
+          value={summary ? formatPercent(summary.compliance_rate) : '-'}
+          tone={summary ? (summary.compliance_rate >= 0.9 ? undefined : 'warning') : undefined}
+          foot={summary ? `达标 ${summary.compliance_count} / ${summary.total} 条` : ''}
+        />
+        <StatCard
+          label="无效数据"
+          value={invalidCount || '-'}
+          tone={invalidCount ? 'warning' : undefined}
+          foot={
+            invalidCount
+              ? '离群值 / 仪器异常, 已从达标率与排名中剔除, 明细仍可查'
+              : '没有被标记为无效的读数'
+          }
         />
       </div>
 
@@ -100,7 +120,11 @@ export default function QueryPage() {
 
       <SectionCard
         title="查询结果"
-        hint="按监测时间倒序, 单次导出最多 20000 行"
+        hint={
+          summary?.invalid_excluded
+            ? '统计按有效数据口径计算; 明细仍展示全部读数, 无效行置灰 (单次导出最多 20000 行)'
+            : '按监测时间倒序, 单次导出最多 20000 行'
+        }
         actions={
           <>
             <button type="button" className="btn btn-sm" onClick={query.reload} disabled={query.loading}>
@@ -112,7 +136,7 @@ export default function QueryPage() {
           </>
         }
       >
-        <QueryResultTable rows={query.items} loading={query.loading} />
+        <QueryResultTable rows={query.items} loading={query.loading} onMarkQuality={(row) => setQualityTarget(row.id)} />
         <Pagination
           page={query.page}
           pages={query.pages}
@@ -122,6 +146,17 @@ export default function QueryPage() {
           onPageSizeChange={query.setPageSize}
         />
       </SectionCard>
+
+      {qualityTarget ? (
+        <QualityFlagModal
+          measurementId={qualityTarget}
+          onClose={() => setQualityTarget(null)}
+          onSaved={() => {
+            query.reload()
+            stats.reload().catch(() => {})
+          }}
+        />
+      ) : null}
     </>
   )
 }

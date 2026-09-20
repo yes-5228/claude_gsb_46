@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FilterPanel } from '../../../components/common/Card.jsx'
 import { Field, Input, Select } from '../../../components/common/FormField.jsx'
 import { usePollutantMeta, useStationOptions } from '../../../hooks/useOptions.js'
+import { QUALITY_FLAG_OPTIONS, QUALITY_STATE_OPTIONS } from '../../../constants/index.js'
 
 const PERIODS = [
   { value: 'hourly', label: '小时均值' },
@@ -29,7 +30,10 @@ export default function MeasurementFilters({ value, loading, onSubmit, onReset }
       loading={loading}
       onSearch={() => onSubmit(draft)}
       onReset={() => {
-        setDraft({ station_id: '', pollutant: '', period: '', is_exceeded: '', date_from: '', date_to: '' })
+        setDraft({
+          station_id: '', pollutant: '', period: '', is_exceeded: '',
+          quality_state: '', quality_flag: '', date_from: '', date_to: ''
+        })
         onReset()
       }}
     >
@@ -57,6 +61,22 @@ export default function MeasurementFilters({ value, loading, onSubmit, onReset }
       </Field>
       <Field label="超标情况">
         <Select value={draft.is_exceeded || ''} onChange={update('is_exceeded')} placeholder="全部" options={EXCEEDED_OPTIONS} />
+      </Field>
+      <Field label="数据质量">
+        <Select
+          value={draft.quality_state || ''}
+          onChange={update('quality_state')}
+          placeholder="全部 (明细含无效数据)"
+          options={QUALITY_STATE_OPTIONS}
+        />
+      </Field>
+      <Field label="标记类型">
+        <Select
+          value={draft.quality_flag || ''}
+          onChange={update('quality_flag')}
+          placeholder="全部标记"
+          options={QUALITY_FLAG_OPTIONS}
+        />
       </Field>
       <Field label="开始日期">
         <Input type="date" value={draft.date_from || ''} onChange={update('date_from')} />

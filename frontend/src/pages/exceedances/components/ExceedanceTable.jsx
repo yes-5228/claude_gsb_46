@@ -1,6 +1,7 @@
 import DataTable from '../../../components/common/DataTable.jsx'
 import Tag from '../../../components/common/Tag.jsx'
-import { EXCEEDANCE_LEVEL_TONE, EXCEEDANCE_STATUS_TONE } from '../../../constants/index.js'
+import QualityFlagTag from '../../../components/common/QualityFlagTag.jsx'
+import { EXCEEDANCE_LEVEL_TONE, EXCEEDANCE_STATUS_TONE, QUALITY_INVALID_FLAGS } from '../../../constants/index.js'
 import { formatDateTime, formatNumber, formatRatio } from '../../../utils/format.js'
 
 export default function ExceedanceTable({
@@ -52,6 +53,17 @@ export default function ExceedanceTable({
       key: 'status',
       title: '标注状态',
       render: (row) => <Tag tone={EXCEEDANCE_STATUS_TONE[row.status]}>{row.status_label}</Tag>
+    },
+    {
+      key: 'measurement_quality_flag',
+      title: '读数质量',
+      render: (row) => (
+        <QualityFlagTag
+          flag={row.measurement_quality_flag}
+          label={row.measurement_quality_label}
+          invalid={QUALITY_INVALID_FLAGS.includes(row.measurement_quality_flag)}
+        />
+      )
     },
     {
       key: 'note',

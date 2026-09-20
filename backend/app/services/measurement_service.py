@@ -1,9 +1,11 @@
 """监测数据录入业务逻辑 (含超标自动判定)."""
+from datetime import datetime
+
 from ..domain import exceedance_rules
 from ..domain.standards import get_pollutant
 from ..errors import ConflictError, NotFoundError, ValidationError
 from ..extensions import db
-from ..models import Exceedance, Measurement, Station
+from ..models import Exceedance, Measurement, QualityFlagLog, Station
 
 
 def get_measurement(measurement_id):
@@ -116,6 +118,22 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
             record = Measurement(station_id=station.id, pollutant=pollutant, period=period,
                                  measured_at=measured_at)
             db.session.add(record)
+        elif record.quality_flag is not None:
+            # 覆盖录入视为重新采集, 清除质量标记并在留痕表追加一条撤销记录
+            db.session.add(
+                QualityFlagLog(
+                    measurement_id=record.id,
+                    station_id=record.station_id,
+                    action="unmark",
+                    flag=None,
+                    reason="覆盖录入新读数, 系统自动取消原质量标记",
+                    marked_by=entry.get("recorder") or recorder or "系统",
+                    marked_at=datetime.now(),
+                    value_before=record.value,
+                    value_after=value,
+                )
+            )
+            record.clear_quality()
 
         record.value = value
         record.unit = meta["unit"]

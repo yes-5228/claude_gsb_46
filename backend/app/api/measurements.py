@@ -1,11 +1,21 @@
 """监测数据录入 API."""
 from flask import Blueprint, current_app, request
 
-from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS
+from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS, QUALITY_FLAG_LABELS
 from ..services import measurement_service, query_service, station_service
 from ..utils.pagination import paginate_query
 from ..utils.validation import Validator
 from .helpers import json_payload, list_payload
+
+QUALITY_CSV_COLUMNS = [
+    ("质量标记", lambda row: QUALITY_FLAG_LABELS.get(row.quality_flag, "") if row.quality_flag else ""),
+    ("质量标记原因", lambda row: row.quality_reason or ""),
+    ("标记人", lambda row: row.quality_marked_by or ""),
+    ("标记时间", lambda row: row.quality_marked_at.strftime("%Y-%m-%d %H:%M")
+        if row.quality_marked_at else ""),
+    ("修正前原值", lambda row: row.original_value if row.original_value is not None else ""),
+    ("是否无效", lambda row: "是" if row.is_quality_invalid else ""),
+]
 
 bp = Blueprint("measurements", __name__)
 
@@ -86,8 +96,50 @@ def export_measurements():
         ("数据来源", lambda row: DATA_SOURCE_LABELS.get(row.data_source, row.data_source)),
         ("录入人", "recorder"),
         ("备注", "remark"),
-    ]
+    ] + QUALITY_CSV_COLUMNS
     return csv_response(rows, columns, "monitoring_data")
+
+
+@bp.patch("/<int:measurement_id>/quality")
+def set_quality(measurement_id):
+    """标记单条读数的数据质量: 离群值 / 仪器异常 / 人工修正."""
+    from ..domain.constants import QUALITY_FLAG_LABELS
+    from ..services import quality_service
+
+    measurement = measurement_service.get_measurement(measurement_id)
+    data = json_payload()
+    validator = Validator(data)
+    flag = validator.choice(
+        "flag", "质量标记", choices=tuple(QUALITY_FLAG_LABELS.keys()), required=True
+    )
+    reason = validator.text("reason", "标记原因", required=True, max_length=500)
+    marked_by = validator.text("marked_by", "标记人", required=False, max_length=64)
+    corrected_value = validator.number("corrected_value", "修正后监测值", required=False)
+    validator.raise_if_invalid("质量标记信息不合法")
+
+    updated = quality_service.mark(
+        measurement,
+        flag=flag,
+        reason=reason,
+        marked_by=marked_by,
+        corrected_value=corrected_value,
+    )
+    return updated.to_dict(include_station=True)
+
+
+@bp.delete("/<int:measurement_id>/quality")
+def clear_quality(measurement_id):
+    """取消数据质量标记 (留痕日志保留)."""
+    from ..services import quality_service
+
+    measurement = measurement_service.get_measurement(measurement_id)
+    data = request.get_json(silent=True) or {}
+    updated = quality_service.unmark(
+        measurement,
+        reason=data.get("reason"),
+        marked_by=data.get("marked_by"),
+    )
+    return updated.to_dict(include_station=True)
 
 
 @bp.get("/<int:measurement_id>")
@@ -100,6 +152,19 @@ def delete_measurement(measurement_id):
     measurement = measurement_service.get_measurement(measurement_id)
     payload = measurement_service.delete_measurement(measurement)
     return {"id": payload["id"], "deleted": True}
+
+
+@bp.get("/quality-logs")
+def quality_logs():
+    """数据质量标记操作留痕列表 (可按读数 / 站点 / 标记类型过滤)."""
+    from ..services import quality_service
+    from ..utils.pagination import paginate_query
+
+    result = paginate_query(
+        quality_service.log_query(request.args),
+        lambda row: row.to_dict(include_measurement=True),
+    )
+    return result
 
 
 @bp.get("/entry-context")
