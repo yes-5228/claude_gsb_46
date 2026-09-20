@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { overview } from '../../api/meta.js'
 import BarChart from '../../components/common/BarChart.jsx'
@@ -7,19 +7,33 @@ import DataTable from '../../components/common/DataTable.jsx'
 import { Alert, ErrorState, Loading } from '../../components/common/Feedback.jsx'
 import StatCard from '../../components/common/StatCard.jsx'
 import Tag from '../../components/common/Tag.jsx'
-import { EXCEEDANCE_LEVEL_TONE } from '../../constants/index.js'
+import {
+  EXCEEDANCE_LEVEL_TONE,
+  QUALITY_FLAG_ACTION_LABELS,
+  QUALITY_FLAG_TONE
+} from '../../constants/index.js'
 import { useAsyncData } from '../../hooks/useAsyncData.js'
 import { formatDateTime, formatNumber, formatPercent, formatRatio } from '../../utils/format.js'
+import QualityFlagHistoryModal from '../measurements/components/QualityFlagHistoryModal.jsx'
 
 export default function OverviewPage() {
   const loader = useCallback(() => overview(), [])
   const { data, loading, error, reload } = useAsyncData(loader)
+  const [historyTargetId, setHistoryTargetId] = useState(null)
 
   if (loading && !data) return <Loading text="正在加载运行概览..." />
   if (error && !data) return <ErrorState error={error} onRetry={reload} />
   if (!data) return null
 
-  const { stations, measurements, exceedances, trend, pending_exceedances: pending } = data
+  const {
+    stations,
+    measurements,
+    exceedances,
+    trend,
+    pending_exceedances: pending,
+    compliance_ranking: ranking,
+    recent_quality_flags: recentFlags
+  } = data
 
   const pendingColumns = [
     { key: 'measured_at', title: '监测时间', className: 'cell-nowrap', render: (row) => formatDateTime(row.measured_at) },
@@ -45,6 +59,75 @@ export default function OverviewPage() {
     ratio: stations.total ? item.count / stations.total : 0
   }))
 
+  const rankingColumns = [
+    {
+      key: 'rank',
+      title: '排名',
+      className: 'cell-nowrap',
+      render: (row) => (
+        <span className={row.rank <= 3 ? 'strong' : 'muted'}>
+          {row.rank === 1 ? '🥇' : row.rank === 2 ? '🥈' : row.rank === 3 ? '🥉' : `#${row.rank}`}
+        </span>
+      )
+    },
+    { key: 'station_name', title: '监测点', render: (row) => (
+      <div>
+        <div>{row.station_name}</div>
+        <div className="small muted mono">{row.station_code} · {row.area}</div>
+      </div>
+    ) },
+    {
+      key: 'compliance_rate',
+      title: '达标率',
+      align: 'right',
+      className: 'cell-nowrap',
+      render: (row) => (
+        <span className={row.compliance_rate >= 0.95 ? 'strong' : 'danger-text strong'}>
+          {formatPercent(row.compliance_rate)}
+        </span>
+      )
+    },
+    { key: 'valid_count', title: '有效数据', align: 'right', render: (row) => row.valid_count },
+    {
+      key: 'exceeded_count',
+      title: '超标',
+      align: 'right',
+      render: (row) => (row.exceeded_count ? <span className="danger-text">{row.exceeded_count}</span> : 0)
+    }
+  ]
+
+  const flagColumns = [
+    { key: 'marked_at', title: '时间', className: 'cell-nowrap', render: (row) => formatDateTime(row.marked_at) },
+    { key: 'station_name', title: '监测点', render: (row) => (
+      <div>
+        <div>{row.station_name}</div>
+        <div className="small muted mono">{row.station_code}</div>
+      </div>
+    ) },
+    { key: 'pollutant_label', title: '因子', render: (row) => row.pollutant_label },
+    {
+      key: 'quality_flag',
+      title: '操作',
+      render: (row) => (
+        <Tag tone={row.action === 'clear' ? 'neutral' : QUALITY_FLAG_TONE[row.quality_flag]}>
+          {QUALITY_FLAG_ACTION_LABELS[row.action] || row.action}
+          {row.quality_flag_label ? ` · ${row.quality_flag_label}` : ''}
+        </Tag>
+      )
+    },
+    { key: 'reason', title: '原因', render: (row) => <span className="small">{row.reason}</span> },
+    { key: 'marked_by', title: '标记人', className: 'cell-nowrap', render: (row) => row.marked_by },
+    {
+      key: 'actions',
+      title: '',
+      render: (row) => (
+        <button type="button" className="btn btn-sm" onClick={() => setHistoryTargetId(row.measurement_id)}>
+          留痕
+        </button>
+      )
+    }
+  ]
+
   return (
     <>
       <div className="stat-grid">
@@ -58,13 +141,13 @@ export default function OverviewPage() {
         <StatCard
           label="监测数据总量"
           value={measurements.total}
-          foot={`覆盖 ${measurements.station_count} 个监测点 · 均值 ${formatNumber(measurements.avg_value)}`}
+          foot={`有效 ${measurements.valid_total} 条 · 无效剔除 ${measurements.invalid_count} 条 · 均值 ${formatNumber(measurements.avg_value)}`}
         />
         <StatCard
           label="超标记录"
           value={exceedances.total}
           tone={exceedances.total ? 'danger' : undefined}
-          foot={`超标率 ${formatPercent(measurements.exceed_rate)} · 最大 ${formatRatio(exceedances.max_ratio)}`}
+          foot={`有效口径超标率 ${formatPercent(measurements.exceed_rate)} · 达标率 ${formatPercent(measurements.compliance_rate)}`}
         />
         <StatCard
           label="待标注超标"
@@ -129,6 +212,36 @@ export default function OverviewPage() {
           />
         )}
       </SectionCard>
+
+      <div className="grid-2">
+        <SectionCard
+          title="监测点达标率排名 (Top 5)"
+          hint="仅统计有效读数; 被标为离群值 / 仪器异常的数据不参与排名"
+          actions={<Link className="btn btn-sm" to="/query">前往数据查询 →</Link>}
+        >
+          {ranking && ranking.length ? (
+            <DataTable columns={rankingColumns} rows={ranking} />
+          ) : (
+            <Alert tone="neutral">暂无可参与排名的有效数据</Alert>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="最近数据质量标记"
+          hint="离群值 / 仪器异常 / 人工修正的操作留痕"
+        >
+          {recentFlags && recentFlags.length ? (
+            <DataTable columns={flagColumns} rows={recentFlags} />
+          ) : (
+            <Alert tone="success">暂无数据质量标记 ✅</Alert>
+          )}
+        </SectionCard>
+      </div>
+
+      <QualityFlagHistoryModal
+        measurementId={historyTargetId}
+        onClose={() => setHistoryTargetId(null)}
+      />
     </>
   )
 }

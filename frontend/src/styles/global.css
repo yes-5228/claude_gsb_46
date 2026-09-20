@@ -280,6 +280,20 @@ ul.plain li { margin-bottom: 5px; }
 .kv dt { color: var(--text-muted); }
 .kv dd { margin: 0; }
 
+.timeline { position: relative; padding-left: 16px; }
+.timeline::before {
+  content: ''; position: absolute; left: 4px; top: 4px; bottom: 4px;
+  width: 2px; background: var(--border-strong, #e2e8f0);
+}
+.timeline-item {
+  position: relative; padding: 10px 12px; margin-bottom: 10px;
+  border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; font-size: 13px;
+}
+.timeline-item::before {
+  content: ''; position: absolute; left: -16px; top: 16px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--primary, #2563eb);
+}
+
 @media (max-width: 900px) {
   .app { flex-direction: column; }
   .sidebar { width: 100%; flex: none; flex-direction: row; overflow-x: auto; align-items: center; padding: 10px; }

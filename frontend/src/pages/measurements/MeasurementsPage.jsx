@@ -16,12 +16,15 @@ import EntryForm from './components/EntryForm.jsx'
 import EntryResultPanel from './components/EntryResultPanel.jsx'
 import MeasurementFilters from './components/MeasurementFilters.jsx'
 import MeasurementTable from './components/MeasurementTable.jsx'
+import QualityFlagHistoryModal from './components/QualityFlagHistoryModal.jsx'
+import QualityFlagModal from './components/QualityFlagModal.jsx'
 
 const INITIAL_FILTERS = {
   station_id: '',
   pollutant: '',
   period: '',
   is_exceeded: '',
+  is_invalid: '',
   date_from: '',
   date_to: ''
 }
@@ -33,6 +36,8 @@ export default function MeasurementsPage() {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [flagTarget, setFlagTarget] = useState(null)
+  const [historyTargetId, setHistoryTargetId] = useState(null)
 
   const handleSubmitted = useCallback(
     (payload) => {
@@ -107,6 +112,8 @@ export default function MeasurementsPage() {
           rows={query.items}
           loading={query.loading}
           onDelete={(row) => setPendingDelete(row)}
+          onFlag={(row) => setFlagTarget(row)}
+          onHistory={(row) => setHistoryTargetId(row.id)}
         />
         <Pagination
           page={query.page}
@@ -128,6 +135,19 @@ export default function MeasurementsPage() {
         confirmText="确认删除"
         onConfirm={handleDelete}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      <QualityFlagModal
+        measurement={flagTarget}
+        onClose={() => setFlagTarget(null)}
+        onSaved={() => {
+          setFlagTarget(null)
+          query.reload()
+        }}
+      />
+      <QualityFlagHistoryModal
+        measurementId={historyTargetId}
+        onClose={() => setHistoryTargetId(null)}
       />
     </>
   )

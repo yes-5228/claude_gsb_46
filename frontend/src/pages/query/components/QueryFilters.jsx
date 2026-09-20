@@ -25,6 +25,17 @@ const SOURCE_OPTIONS = [
   { value: 'import', label: '历史导入' }
 ]
 
+const QUALITY_OPTIONS = [
+  { value: 'outlier', label: '离群值 (无效)' },
+  { value: 'instrument', label: '仪器异常 (无效)' },
+  { value: 'corrected', label: '人工修正 (有效)' }
+]
+
+const VALIDITY_OPTIONS = [
+  { value: 'true', label: '仅无效数据' },
+  { value: 'false', label: '仅有效数据' }
+]
+
 export default function QueryFilters({ value, loading, onSubmit, onReset }) {
   const [draft, setDraft] = useState(value)
   const { data: stationData } = useStationOptions()
@@ -44,6 +55,7 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
         setDraft({
           keyword: '', station_id: '', area: '', pollutant: '', period: '',
           is_exceeded: '', exceedance_status: '', data_source: '',
+          quality_flag: '', is_invalid: '',
           date_from: '', date_to: '', min_value: '', max_value: ''
         })
         onReset()
@@ -97,6 +109,22 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
       </Field>
       <Field label="数据来源">
         <Select value={draft.data_source || ''} onChange={update('data_source')} placeholder="全部来源" options={SOURCE_OPTIONS} />
+      </Field>
+      <Field label="数据质量标记">
+        <Select
+          value={draft.quality_flag || ''}
+          onChange={update('quality_flag')}
+          placeholder="全部标记"
+          options={QUALITY_OPTIONS}
+        />
+      </Field>
+      <Field label="是否有效">
+        <Select
+          value={draft.is_invalid || ''}
+          onChange={update('is_invalid')}
+          placeholder="全部 (统计自动剔除无效)"
+          options={VALIDITY_OPTIONS}
+        />
       </Field>
       <Field label="开始日期">
         <Input type="date" value={draft.date_from || ''} onChange={update('date_from')} />

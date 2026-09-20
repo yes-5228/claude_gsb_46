@@ -87,6 +87,9 @@ def export_measurements():
         ("录入人", "recorder"),
         ("备注", "remark"),
     ]
+    from .query import QUALITY_EXPORT_COLUMNS
+
+    columns.extend(QUALITY_EXPORT_COLUMNS)
     return csv_response(rows, columns, "monitoring_data")
 
 

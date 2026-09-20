@@ -1,12 +1,27 @@
 """数据查询 API: 条件检索 / 聚合统计 / 导出."""
 from flask import Blueprint, current_app, request
 
-from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS, STATION_TYPE_LABELS
+from ..domain.constants import (
+    DATA_SOURCE_LABELS,
+    PERIOD_LABELS,
+    QUALITY_FLAG_LABELS,
+    STATION_TYPE_LABELS,
+)
 from ..domain.standards import POLLUTANTS
 from ..services import query_service
 from ..utils.pagination import paginate_query
 
 bp = Blueprint("query", __name__)
+
+QUALITY_EXPORT_COLUMNS = [
+    ("质量标记", lambda row: QUALITY_FLAG_LABELS.get(row.quality_flag, "") if row.quality_flag else ""),
+    ("是否无效", lambda row: "是" if row.is_invalid else "否"),
+    ("标记原因", lambda row: row.quality_reason or ""),
+    ("标记人", lambda row: row.quality_marked_by or ""),
+    ("标记时间", lambda row: row.quality_marked_at.strftime("%Y-%m-%d %H:%M")
+     if row.quality_marked_at else ""),
+    ("原始读数", lambda row: row.original_value if row.original_value is not None else ""),
+]
 
 
 @bp.get("/measurements")
@@ -43,6 +58,7 @@ def query_export():
         ("监测时间", lambda row: row.measured_at.strftime("%Y-%m-%d %H:%M")),
         ("数据来源", lambda row: DATA_SOURCE_LABELS.get(row.data_source, row.data_source)),
         ("录入人", "recorder"),
+        *QUALITY_EXPORT_COLUMNS,
     ]
     return csv_response(rows, columns, "monitoring_query")
 

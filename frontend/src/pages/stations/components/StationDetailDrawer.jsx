@@ -75,10 +75,14 @@ export default function StationDetailDrawer({ stationId, onClose, onEdit }) {
             <div className="stat-card">
               <div className="stat-label">累计监测数据</div>
               <div className="stat-value">{stats.measurement_count ?? 0}</div>
+              <div className="stat-foot">
+                有效 {stats.valid_count ?? 0} · 无效 {stats.invalid_count ?? 0}
+              </div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">超标记录</div>
-              <div className="stat-value danger-text">{stats.exceeded_count ?? 0}</div>
+              <div className="stat-label">达标率 (有效口径)</div>
+              <div className="stat-value">{stats.compliance_rate == null ? '-' : `${Math.round(stats.compliance_rate * 1000) / 10}%`}</div>
+              <div className="stat-foot">超标 {stats.exceeded_count ?? 0} 条</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">待标注</div>

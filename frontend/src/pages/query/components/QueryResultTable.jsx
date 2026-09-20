@@ -2,8 +2,9 @@ import DataTable from '../../../components/common/DataTable.jsx'
 import Tag from '../../../components/common/Tag.jsx'
 import { DATA_SOURCE_TONE, EXCEEDANCE_STATUS_TONE } from '../../../constants/index.js'
 import { formatDateTime, formatNumber } from '../../../utils/format.js'
+import QualityFlagCell from '../../measurements/components/QualityFlagCell.jsx'
 
-export default function QueryResultTable({ rows, loading }) {
+export default function QueryResultTable({ rows, loading, onFlag, onHistory }) {
   const columns = [
     { key: 'measured_at', title: '监测时间', className: 'cell-nowrap', render: (row) => formatDateTime(row.measured_at) },
     { key: 'station', title: '监测点', render: (row) => `${row.station?.code || ''} ${row.station?.name || ''}` },
@@ -15,7 +16,7 @@ export default function QueryResultTable({ rows, loading }) {
       title: '监测值',
       align: 'right',
       render: (row) => (
-        <span className={row.is_exceeded ? 'danger-text strong' : ''}>
+        <span className={row.is_exceeded && !row.is_invalid ? 'danger-text strong' : row.is_invalid ? 'muted' : ''}>
           {formatNumber(row.value)} <span className="muted small">{row.unit}</span>
         </span>
       )
@@ -24,7 +25,15 @@ export default function QueryResultTable({ rows, loading }) {
     {
       key: 'is_exceeded',
       title: '超标',
-      render: (row) => (row.is_exceeded ? <Tag tone="danger">是</Tag> : <Tag tone="success">否</Tag>)
+      render: (row) => {
+        if (row.is_invalid) return <Tag tone="neutral">无效</Tag>
+        return row.is_exceeded ? <Tag tone="danger">是</Tag> : <Tag tone="success">否</Tag>
+      }
+    },
+    {
+      key: 'quality_flag',
+      title: '数据质量',
+      render: (row) => <QualityFlagCell row={row} onFlag={onFlag} onHistory={onHistory} />
     },
     {
       key: 'exceedance_status',

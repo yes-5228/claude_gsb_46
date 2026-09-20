@@ -116,6 +116,13 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
             record = Measurement(station_id=station.id, pollutant=pollutant, period=period,
                                  measured_at=measured_at)
             db.session.add(record)
+        else:
+            # 覆盖已有读数时撤销旧的质量标记并留痕, 避免旧标记错配到新值上.
+            from . import quality_service
+
+            quality_service.clear_on_overwrite(
+                record, recorder=entry.get("recorder") or recorder, new_value=value
+            )
 
         record.value = value
         record.unit = meta["unit"]

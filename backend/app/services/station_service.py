@@ -6,6 +6,12 @@ from ..errors import ConflictError, NotFoundError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
 
+# 有效读数: 未标记, 或仅做人工修正; 离群值 / 仪器异常不计入达标率与排名.
+_VALID = or_(
+    Measurement.quality_flag.is_(None),
+    Measurement.quality_flag.notin_(("outlier", "instrument")),
+)
+
 
 def _split(value):
     if not value:
@@ -80,7 +86,11 @@ def delete_station(station):
 
 
 def stats_map(station_ids):
-    """Aggregated counters for a page of stations."""
+    """Aggregated counters for a page of stations.
+
+    监测数据总量保留全量口径 (无效读数仍在明细里可查); 超标与达标率指标
+    只统计有效读数, 另给 invalid_count 用于提示剔除条数.
+    """
     if not station_ids:
         return {}
     measurements = dict(
@@ -89,9 +99,19 @@ def stats_map(station_ids):
         .group_by(Measurement.station_id)
         .all()
     )
+    valid = dict(
+        db.session.query(Measurement.station_id, func.count(Measurement.id))
+        .filter(Measurement.station_id.in_(station_ids), _VALID)
+        .group_by(Measurement.station_id)
+        .all()
+    )
     exceeded = dict(
         db.session.query(Measurement.station_id, func.count(Measurement.id))
-        .filter(Measurement.station_id.in_(station_ids), Measurement.is_exceeded.is_(True))
+        .filter(
+            Measurement.station_id.in_(station_ids),
+            _VALID,
+            Measurement.is_exceeded.is_(True),
+        )
         .group_by(Measurement.station_id)
         .all()
     )
@@ -103,25 +123,33 @@ def stats_map(station_ids):
     )
     last_seen = dict(
         db.session.query(Measurement.station_id, func.max(Measurement.measured_at))
-        .filter(Measurement.station_id.in_(station_ids))
+        .filter(Measurement.station_id.in_(station_ids), _VALID)
         .group_by(Measurement.station_id)
         .all()
     )
     from ..models.base import iso
 
-    return {
-        station_id: {
-            "measurement_count": int(measurements.get(station_id, 0)),
-            "exceeded_count": int(exceeded.get(station_id, 0)),
+    stats = {}
+    for station_id in station_ids:
+        total = int(measurements.get(station_id, 0))
+        valid_total = int(valid.get(station_id, 0))
+        exceeded_total = int(exceeded.get(station_id, 0))
+        stats[station_id] = {
+            "measurement_count": total,
+            "valid_count": valid_total,
+            "invalid_count": total - valid_total,
+            "exceeded_count": exceeded_total,
+            "compliance_rate": round((valid_total - exceeded_total) / valid_total, 4)
+            if valid_total
+            else None,
             "pending_count": int(pending.get(station_id, 0)),
             "last_measured_at": iso(last_seen.get(station_id)),
         }
-        for station_id in station_ids
-    }
+    return stats
 
 
 def detail_stats(station):
-    """Per-pollutant counters for the station detail drawer."""
+    """Per-pollutant counters for the station detail drawer (有效口径)."""
     rows = (
         db.session.query(
             Measurement.pollutant,
@@ -130,7 +158,7 @@ def detail_stats(station):
             func.avg(Measurement.value),
             func.max(Measurement.value),
         )
-        .filter(Measurement.station_id == station.id)
+        .filter(Measurement.station_id == station.id, _VALID)
         .group_by(Measurement.pollutant)
         .all()
     )
@@ -147,6 +175,53 @@ def detail_stats(station):
     summary = stats_map([station.id]).get(station.id, {})
     summary["pollutants"] = sorted(pollutants, key=lambda item: item["pollutant"])
     return summary
+
+
+def compliance_ranking(limit=5):
+    """按监测点统计有效读数达标率并排名, 无效读数不参与.
+
+    只纳入存在有效数据的监测点; 达标率相同时数据量大者优先.
+    """
+    rows = (
+        db.session.query(
+            Station.id,
+            Station.code,
+            Station.name,
+            Station.area,
+            func.count(Measurement.id).label("total"),
+            func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded"),
+        )
+        .join(Measurement, Measurement.station_id == Station.id)
+        .filter(_VALID)
+        .group_by(Station.id, Station.code, Station.name, Station.area)
+        .all()
+    )
+    items = []
+    for station_id, code, name, area, total, exceeded in rows:
+        total = int(total or 0)
+        exceeded = int(exceeded or 0)
+        items.append(
+            {
+                "station_id": station_id,
+                "station_code": code,
+                "station_name": name,
+                "area": area,
+                "valid_count": total,
+                "exceeded_count": exceeded,
+                "compliance_rate": round((total - exceeded) / total, 4) if total else None,
+            }
+        )
+    items.sort(
+        key=lambda item: (
+            item["compliance_rate"] is None,
+            -(item["compliance_rate"] or 0),
+            -item["valid_count"],
+            item["station_code"],
+        )
+    )
+    for index, item in enumerate(items, start=1):
+        item["rank"] = index
+    return items[:limit]
 
 
 def option_list():

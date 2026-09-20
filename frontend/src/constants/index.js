@@ -16,6 +16,16 @@ export const DATA_SOURCE_TONE = { manual: 'primary', device: 'info', import: 'ne
 export const EXCEEDANCE_LEVEL_LABELS = { light: '轻度超标', moderate: '中度超标', severe: '重度超标' }
 export const EXCEEDANCE_STATUS_LABELS = { pending: '待标注', confirmed: '已确认', ignored: '已忽略' }
 
+export const QUALITY_FLAG_LABELS = {
+  outlier: '离群值',
+  instrument: '仪器异常',
+  corrected: '人工修正'
+}
+// 离群值 / 仪器异常视为无效数据, 不参与达标率与排名; 人工修正仍为有效数据
+export const INVALID_QUALITY_FLAGS = ['outlier', 'instrument']
+export const QUALITY_FLAG_TONE = { outlier: 'warning', instrument: 'danger', corrected: 'info' }
+export const QUALITY_FLAG_ACTION_LABELS = { flag: '标记', clear: '撤销标记' }
+
 export const POLLUTANT_CODE_LABELS = {
   PM25: 'PM2.5',
   PM10: 'PM10',

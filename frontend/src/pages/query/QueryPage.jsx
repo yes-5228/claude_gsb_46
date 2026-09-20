@@ -13,6 +13,8 @@ import { formatDateTime, formatNumber, formatPercent } from '../../utils/format.
 import QueryFilters from './components/QueryFilters.jsx'
 import QueryResultTable from './components/QueryResultTable.jsx'
 import StatisticsPanel from './components/StatisticsPanel.jsx'
+import QualityFlagHistoryModal from '../measurements/components/QualityFlagHistoryModal.jsx'
+import QualityFlagModal from '../measurements/components/QualityFlagModal.jsx'
 
 const INITIAL_FILTERS = {
   keyword: '',
@@ -23,6 +25,8 @@ const INITIAL_FILTERS = {
   is_exceeded: '',
   exceedance_status: '',
   data_source: '',
+  quality_flag: '',
+  is_invalid: '',
   date_from: '',
   date_to: '',
   min_value: '',
@@ -34,6 +38,8 @@ export default function QueryPage() {
   const query = useListQuery(queryMeasurements, INITIAL_FILTERS, { pageSize: 20 })
   const [statsParams, setStatsParams] = useState({ group_by: 'pollutant', metric: 'avg' })
   const [exporting, setExporting] = useState(false)
+  const [flagTarget, setFlagTarget] = useState(null)
+  const [historyTargetId, setHistoryTargetId] = useState(null)
 
   const statsLoader = useCallback(
     () => queryStatistics({ ...query.filters, ...statsParams }),
@@ -73,14 +79,22 @@ export default function QueryPage() {
       {query.error ? <Alert tone="error">{query.error.message}</Alert> : null}
 
       <div className="stat-grid">
-        <StatCard label="符合条件的数据量" value={summary ? summary.total : '-'} foot={summary ? `涉及 ${summary.station_count} 个监测点` : ''} />
         <StatCard
-          label="超标记录"
+          label="符合条件的数据量"
+          value={summary ? summary.total : '-'}
+          foot={
+            summary
+              ? `有效 ${summary.valid_total} 条 · 无效剔除 ${summary.invalid_count} 条 · 涉及 ${summary.station_count} 个监测点`
+              : ''
+          }
+        />
+        <StatCard
+          label="超标记录 (有效口径)"
           value={summary ? summary.exceeded_count : '-'}
           tone={summary?.exceeded_count ? 'danger' : undefined}
-          foot={summary ? `超标率 ${formatPercent(summary.exceed_rate)}` : ''}
+          foot={summary ? `超标率 ${formatPercent(summary.exceed_rate)} · 达标率 ${formatPercent(summary.compliance_rate)}` : ''}
         />
-        <StatCard label="平均浓度" value={summary ? formatNumber(summary.avg_value) : '-'} foot="按当前筛选范围计算" />
+        <StatCard label="平均浓度 (有效口径)" value={summary ? formatNumber(summary.avg_value) : '-'} foot="无效读数已剔除" />
         <StatCard
           label="时间范围"
           value={summary ? formatDateTime(summary.first_measured_at).slice(5, 10) : '-'}
@@ -112,7 +126,12 @@ export default function QueryPage() {
           </>
         }
       >
-        <QueryResultTable rows={query.items} loading={query.loading} />
+        <QueryResultTable
+          rows={query.items}
+          loading={query.loading}
+          onFlag={(row) => setFlagTarget(row)}
+          onHistory={(row) => setHistoryTargetId(row.id)}
+        />
         <Pagination
           page={query.page}
           pages={query.pages}
@@ -122,6 +141,20 @@ export default function QueryPage() {
           onPageSizeChange={query.setPageSize}
         />
       </SectionCard>
+
+      <QualityFlagModal
+        measurement={flagTarget}
+        onClose={() => setFlagTarget(null)}
+        onSaved={() => {
+          setFlagTarget(null)
+          query.reload()
+          stats.reload().catch(() => {})
+        }}
+      />
+      <QualityFlagHistoryModal
+        measurementId={historyTargetId}
+        onClose={() => setHistoryTargetId(null)}
+      />
     </>
   )
 }

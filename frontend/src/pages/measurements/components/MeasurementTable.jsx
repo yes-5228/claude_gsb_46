@@ -2,8 +2,9 @@ import DataTable from '../../../components/common/DataTable.jsx'
 import Tag from '../../../components/common/Tag.jsx'
 import { DATA_SOURCE_TONE } from '../../../constants/index.js'
 import { formatDateTime, formatNumber, formatRatio } from '../../../utils/format.js'
+import QualityFlagCell from './QualityFlagCell.jsx'
 
-export default function MeasurementTable({ rows, loading, onDelete }) {
+export default function MeasurementTable({ rows, loading, onDelete, onFlag, onHistory }) {
   const columns = [
     { key: 'measured_at', title: '监测时间', className: 'cell-nowrap', render: (row) => formatDateTime(row.measured_at) },
     {
@@ -24,8 +25,11 @@ export default function MeasurementTable({ rows, loading, onDelete }) {
       align: 'right',
       className: 'cell-nowrap',
       render: (row) => (
-        <span className={row.is_exceeded ? 'danger-text strong' : ''}>
+        <span className={row.is_exceeded && !row.is_invalid ? 'danger-text strong' : row.is_invalid ? 'muted' : ''}>
           {formatNumber(row.value)} <span className="muted small">{row.unit}</span>
+          {row.quality_flag === 'corrected' && row.original_value !== null ? (
+            <div className="small muted">原 {formatNumber(row.original_value)}</div>
+          ) : null}
         </span>
       )
     },
@@ -38,8 +42,15 @@ export default function MeasurementTable({ rows, loading, onDelete }) {
     {
       key: 'is_exceeded',
       title: '超标判定',
-      render: (row) =>
-        row.is_exceeded ? <Tag tone="danger">{formatRatio(row.exceed_ratio)}</Tag> : <Tag tone="success">达标</Tag>
+      render: (row) => {
+        if (row.is_invalid) return <Tag tone="neutral" title="该读数被标为无效, 不计入达标率">无效数据</Tag>
+        return row.is_exceeded ? <Tag tone="danger">{formatRatio(row.exceed_ratio)}</Tag> : <Tag tone="success">达标</Tag>
+      }
+    },
+    {
+      key: 'quality_flag',
+      title: '数据质量',
+      render: (row) => <QualityFlagCell row={row} onFlag={onFlag} onHistory={onHistory} />
     },
     {
       key: 'data_source_label',

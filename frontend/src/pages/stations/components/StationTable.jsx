@@ -33,7 +33,29 @@ export default function StationTable({ rows, loading, onDetail, onEdit, onDelete
       key: 'stats',
       title: '数据量',
       align: 'right',
-      render: (row) => formatNumber(row.stats?.measurement_count ?? 0, 0)
+      render: (row) => (
+        <div>
+          <div>{formatNumber(row.stats?.measurement_count ?? 0, 0)}</div>
+          {row.stats?.invalid_count ? (
+            <div className="small" style={{ color: 'var(--warning)' }}>
+              无效 {row.stats.invalid_count}
+            </div>
+          ) : null}
+        </div>
+      )
+    },
+    {
+      key: 'compliance',
+      title: '达标率',
+      align: 'right',
+      render: (row) =>
+        row.stats?.compliance_rate == null ? (
+          <span className="muted">-</span>
+        ) : (
+          <span className={row.stats.compliance_rate >= 0.95 ? 'strong' : 'danger-text strong'}>
+            {`${Math.round(row.stats.compliance_rate * 1000) / 10}%`}
+          </span>
+        )
     },
     {
       key: 'exceeded',

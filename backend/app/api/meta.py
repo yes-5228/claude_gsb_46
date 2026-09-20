@@ -8,12 +8,14 @@ from ..domain.constants import (
     EXCEEDANCE_LEVEL_LABELS,
     EXCEEDANCE_STATUS_LABELS,
     PERIOD_LABELS,
+    QUALITY_FLAG_LABELS,
     STATION_STATUS_LABELS,
     STATION_TYPE_LABELS,
     options_payload,
 )
 from ..domain.standards import POLLUTANTS
 from ..extensions import db
+from ..models import QualityFlagLog
 from ..services import exceedance_service, query_service, station_service
 
 bp = Blueprint("meta", __name__)
@@ -54,7 +56,7 @@ def options():
 
 @bp.get("/overview")
 def overview():
-    """首页概览: 台账规模 / 数据量 / 超标待办 / 近 7 日趋势."""
+    """首页概览: 台账规模 / 数据量 / 超标待办 / 达标率排名 / 近 7 日趋势."""
     today = date.today()
     trend_args = {
         "group_by": "day",
@@ -70,10 +72,18 @@ def overview():
         .limit(5)
         .all()
     )
+    recent_flags = (
+        db.session.query(QualityFlagLog)
+        .order_by(QualityFlagLog.marked_at.desc(), QualityFlagLog.id.desc())
+        .limit(8)
+        .all()
+    )
     return {
         "stations": station_service.metadata_summary(),
         "measurements": query_service.summary(filters),
         "exceedances": exceedance_service.summary({}),
+        "compliance_ranking": station_service.compliance_ranking(limit=5),
+        "recent_quality_flags": [log.to_dict() for log in recent_flags],
         "pending_exceedances": [record.to_dict() for record in pending_records],
         "trend": trend,
         "labels": {
@@ -82,6 +92,7 @@ def overview():
             "exceedance_status": EXCEEDANCE_STATUS_LABELS,
             "exceedance_level": EXCEEDANCE_LEVEL_LABELS,
             "data_source": DATA_SOURCE_LABELS,
+            "quality_flag": QUALITY_FLAG_LABELS,
         },
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }

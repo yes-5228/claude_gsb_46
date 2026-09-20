@@ -1,5 +1,11 @@
 """监测数据记录."""
-from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS, label_of
+from ..domain.constants import (
+    DATA_SOURCE_LABELS,
+    INVALID_QUALITY_FLAGS,
+    PERIOD_LABELS,
+    QUALITY_FLAG_LABELS,
+    label_of,
+)
 from ..domain.standards import get_pollutant
 from ..extensions import db
 from .base import TimestampMixin, iso
@@ -30,6 +36,14 @@ class Measurement(TimestampMixin, db.Model):
     recorder = db.Column(db.String(64))
     remark = db.Column(db.Text)
 
+    # 数据质量标记 (当前状态); 完整留痕见 QualityFlagLog.
+    quality_flag = db.Column(db.String(16), index=True)
+    quality_reason = db.Column(db.Text)
+    quality_marked_by = db.Column(db.String(64))
+    quality_marked_at = db.Column(db.DateTime, index=True)
+    # 人工修正前的原始读数, 与修正后的 value 对照保留.
+    original_value = db.Column(db.Float)
+
     station = db.relationship("Station", back_populates="measurements")
     exceedance = db.relationship(
         "Exceedance",
@@ -38,6 +52,36 @@ class Measurement(TimestampMixin, db.Model):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    quality_logs = db.relationship(
+        "QualityFlagLog",
+        back_populates="measurement",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="QualityFlagLog.id.desc()",
+    )
+
+    @property
+    def is_invalid(self):
+        """离群值 / 仪器异常标记的读数视为无效, 不参与达标率与排名."""
+        return self.quality_flag in INVALID_QUALITY_FLAGS
+
+    @property
+    def is_quality_flagged(self):
+        return self.quality_flag is not None
+
+    def quality_flag_label(self):
+        return label_of(QUALITY_FLAG_LABELS, self.quality_flag) if self.quality_flag else None
+
+    def quality_payload(self):
+        return {
+            "quality_flag": self.quality_flag,
+            "quality_flag_label": self.quality_flag_label(),
+            "quality_reason": self.quality_reason,
+            "quality_marked_by": self.quality_marked_by,
+            "quality_marked_at": iso(self.quality_marked_at),
+            "original_value": self.original_value,
+            "is_invalid": self.is_invalid,
+        }
 
     def pollutant_label(self):
         meta = get_pollutant(self.pollutant)
@@ -65,6 +109,7 @@ class Measurement(TimestampMixin, db.Model):
             "updated_at": iso(self.updated_at),
             "exceedance_id": self.exceedance.id if self.exceedance else None,
             "exceedance_status": self.exceedance.status if self.exceedance else None,
+            **self.quality_payload(),
         }
         if include_station and self.station:
             payload["station"] = {

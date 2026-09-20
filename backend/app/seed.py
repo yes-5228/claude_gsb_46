@@ -125,7 +125,7 @@ def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
                 totals["exceedances"] += result["summary"]["exceeded_count"]
 
     # 标注一部分超标记录, 让工作台同时存在待办与已处理记录
-    from .services import exceedance_service
+    from .services import exceedance_service, quality_service
 
     exceedances = Exceedance.query.order_by(Exceedance.id.asc()).all()
     annotated = 0
@@ -144,7 +144,62 @@ def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
             )
         annotated += 1
     totals["annotated"] = annotated
+
+    # 少量数据质量标记: 离群值 / 仪器异常判为无效, 人工修正给出订正后的值.
+    quality_demo = _seed_quality_flags(rng, recorder_pool)
+    totals["quality_flags"] = quality_demo
     return totals
+
+
+def _seed_quality_flags(rng, recorder_pool):
+    """给演示数据补充若干数据质量标记, 用于功能展示."""
+    from .services import quality_service
+
+    count = 0
+    measurements = Measurement.query.order_by(Measurement.id.asc()).all()
+    if not measurements:
+        return count
+
+    flagged_outlier = measurements[len(measurements) // 5]
+    quality_service.flag_measurement(
+        flagged_outlier,
+        flag="outlier",
+        reason="该读数显著偏离相邻时段与同类站点, 判定为离群值, 不计入达标率",
+        marked_by=rng.choice(recorder_pool),
+    )
+    count += 1
+
+    instrument_candidates = [
+        row for row in measurements[len(measurements) // 2:]
+        if row.id != flagged_outlier.id
+    ]
+    if instrument_candidates:
+        flagged_instrument = instrument_candidates[0]
+        quality_service.flag_measurement(
+            flagged_instrument,
+            flag="instrument",
+            reason="该时段站点分析仪故障, 数据异常, 待运维检修后复测",
+            marked_by=rng.choice(recorder_pool),
+        )
+        count += 1
+
+    corrected_candidates = [
+        row for row in measurements[len(measurements) // 3:]
+        if row.id not in {flagged_outlier.id,
+                          (instrument_candidates[0].id if instrument_candidates else -1)}
+    ]
+    if corrected_candidates:
+        to_correct = corrected_candidates[0]
+        corrected_value = round(float(to_correct.value) * 0.6, 2 if to_correct.pollutant == "CO" else 1)
+        quality_service.flag_measurement(
+            to_correct,
+            flag="corrected",
+            reason="原始数据单位换算错误, 已按人工复核结果订正",
+            marked_by=rng.choice(recorder_pool),
+            corrected_value=corrected_value,
+        )
+        count += 1
+    return count
 
 
 def reset_database():
@@ -162,6 +217,9 @@ def ensure_bootstrap(app):
         try:
             if auto_init:
                 db.create_all()
+                from .utils.migrations import ensure_schema
+
+                ensure_schema()
             if auto_seed and db.session.query(Station.id).first() is None:
                 app.logger.info("seeding demo data ...")
                 seed_demo_data()

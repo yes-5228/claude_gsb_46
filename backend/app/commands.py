@@ -10,7 +10,10 @@ def register_commands(app):
     def init_db():
         """Create database tables."""
         db.create_all()
-        click.echo("数据库表已创建")
+        from .utils.migrations import ensure_schema
+
+        added = ensure_schema()
+        click.echo("数据库表已创建" + (" (%d 列已补齐)" % added if added else ""))
 
     @app.cli.command("seed")
     @click.option("--days", default=5, show_default=True, help="生成最近多少天的数据")

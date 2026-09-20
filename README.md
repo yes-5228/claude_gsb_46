@@ -8,11 +8,11 @@
 
 | 模块 | 路由 | 主要能力 |
 | --- | --- | --- |
-| 运行概览 | `/overview` | 监测点规模、数据总量、超标与待标注统计、近 7 日数据量趋势、待办超标列表 |
-| 监测点台账 | `/stations` | 台账增删改查、区域/类型/状态筛选、点位详情与分因子统计、级联清理关联数据 |
-| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、录入结果回执 |
+| 运行概览 | `/overview` | 监测点规模、数据总量、超标与待标注统计、**监测点达标率排名**、近 7 日趋势、**最近数据质量标记**、待办超标列表 |
+| 监测点台账 | `/stations` | 台账增删改查、区域/类型/状态筛选、点位详情与分因子统计(含达标率/无效条数)、级联清理关联数据 |
+| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、录入结果回执、**单条读数质量标记(离群值/仪器异常/人工修正)与留痕** |
 | 超标记录标注 | `/exceedances` | 超标自动建单、单条/批量标注(确认 / 忽略 / 重置)、等级人工修正、标注留痕与统计 |
-| 数据查询 | `/query` | 多条件组合检索、聚合统计(按因子/站点/区域/日/月等)、分页浏览、CSV 导出 |
+| 数据查询 | `/query` | 多条件组合检索(含质量标记/有效性筛选)、聚合统计(按因子/站点/区域/日/月等)、分页浏览、CSV 导出 |
 
 设计要点:
 
@@ -28,7 +28,7 @@
 | 数据库 | SQLite(默认, 零依赖) / PostgreSQL 16(可选, compose 覆盖文件) |
 | 前端 | React 18 · React Router 6 · Vite 7 · Axios · 原生 CSS(设计令牌 + 组件类) |
 | 部署 | Docker 多阶段构建 · Nginx 静态托管与 `/api` 反向代理 · docker compose |
-| 测试 | Pytest(43 个后端用例: 接口 + 领域规则) |
+| 测试 | Pytest(53 个后端用例: 接口 + 领域规则) |
 
 ## 目录结构
 
@@ -43,9 +43,9 @@
 │   │   ├── commands.py          # flask init-db / seed / reset-db / stats
 │   │   ├── seed.py              # 演示数据生成与启动引导
 │   │   ├── domain/              # 业务规则: 因子限值、枚举、超标分级
-│   │   ├── models/              # Station / Measurement / Exceedance
-│   │   ├── services/            # 台账、录入、标注、查询统计业务逻辑
-│   │   ├── api/                 # 蓝图: meta / stations / measurements / exceedances / query
+│   │   ├── models/              # Station / Measurement / Exceedance / QualityFlagLog
+│   │   ├── services/            # 台账、录入、标注、质量标记、查询统计业务逻辑
+│   │   ├── api/                 # 蓝图: meta / stations / measurements / exceedances / quality / query
 │   │   └── utils/               # 校验器、分页、CSV 导出
 │   ├── tests/                   # Pytest 用例
 │   ├── Dockerfile · docker-entrypoint.sh · requirements*.txt
@@ -141,6 +141,17 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 - **无 1 小时限值的因子**(PM2.5、PM10 小时值)仅记录数值, 不参与超标判定, 避免误报。
 - **标注状态**: `待标注(pending)` 由系统自动创建, 人工标注为 `已确认(confirmed)` 或 `已忽略(ignored)`; 确认与忽略都必须填写标注说明, 用于后续追溯。
 
+## 数据质量标记
+
+对个别读数可标记为 **离群值(`outlier`)**、**仪器异常(`instrument`)** 或 **人工修正(`corrected`)**, 用于剔除异常数据同时保留完整明细与审计轨迹。
+
+- **标记与留痕**: 标记类型、**标记原因**、**标记人**(留空记为“未署名”)、**标记时间** 均写入 `quality_flag_logs`, 标记与撤销全过程可追溯; 单条读数的留痕按时间倒序查询。
+- **无效口径**: 离群值 / 仪器异常视为**无效数据** —— 不计入达标率、超标率、聚合统计与监测点排名, 但**仍出现在监测明细、查询结果与 CSV 导出中**, 并以“无效”标记展示, 另给原始留痕。
+- **人工修正**: 必须填写修正后的监测值; 系统保留**原始读数**(`original_value`)并按新值重新进行超标判定(自动建单 / 撤销), 修正后的读数仍为**有效数据**。
+- **撤销标记**: 需填写撤销原因; 撤销后读数重新计入达标率与排名(人工修正得到的新值作为正式读数保留), 撤销动作同样留痕。
+- **覆盖保护**: 重新录入覆盖已有读数时, 原读数上的标记会自动撤销并留痕, 避免旧标记错配到新值。
+- **筛选与导出**: 数据查询 / 录入列表支持按质量标记与“是否有效”筛选; CSV 导出附带质量标记、是否无效、标记原因/人/时间、原始读数列。
+
 ## API 概览
 
 统一前缀 `/api`, 成功直接返回数据对象; 失败返回 `{"error": {"code": "...", "message": "...", "fields": {...}}}`。
@@ -158,6 +169,10 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | GET | `/api/measurements` | 监测数据分页查询(含筛选汇总) |
 | POST | `/api/measurements/entries` | **成组录入**: 一个监测点 + 一个时刻 + 多个因子 |
 | POST | `/api/measurements/preview` | 超标校验预览(不写库) |
+| POST | `/api/measurements/{id}/flag` | **数据质量标记**(离群值/仪器异常/人工修正, 含原因/人) |
+| POST | `/api/measurements/{id}/clear-flag` | 撤销质量标记(需原因, 留痕保留) |
+| GET | `/api/measurements/{id}/flags` | 单条读数的完整标记留痕 |
+| GET | `/api/measurements/flag-logs` | 质量标记留痕分页查询(可按标记/操作人等筛选) |
 | DELETE | `/api/measurements/{id}` | 删除监测数据 |
 | GET | `/api/measurements/export` | 按条件导出 CSV |
 | GET | `/api/exceedances` | 超标记录查询(含筛选统计) |
@@ -205,8 +220,11 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
 | `stations` | `code`(唯一) `name` `area` `station_type` `status` `longitude/latitude` `installed_at` | 监测点台账 |
-| `measurements` | `station_id` `pollutant` `period` `value` `limit_value` `exceed_ratio` `is_exceeded` `measured_at` `data_source` `recorder` | 监测数据; `(station_id, pollutant, period, measured_at)` 唯一 |
+| `measurements` | `station_id` `pollutant` `period` `value` `limit_value` `exceed_ratio` `is_exceeded` `measured_at` `data_source` `recorder` `quality_flag` `quality_reason` `quality_marked_by/at` `original_value` | 监测数据; `(station_id, pollutant, period, measured_at)` 唯一 |
+| `quality_flag_logs` | `measurement_id` `action`(标记/撤销) `quality_flag` `reason` `marked_by` `marked_at` `value_before/after` | 数据质量标记审计留痕 |
 | `exceedances` | `measurement_id`(唯一) `status` `level` `note` `annotator` `annotated_at` | 超标记录与人工标注 |
+
+> 已存在的数据库会在启动 / `flask init-db` 时通过轻量 `ALTER TABLE` 补丁自动补齐 `measurements` 的新增列, 无需手动迁移。
 
 删除监测点会级联清理其监测数据与超标记录; 删除监测数据会同时删除对应超标记录。
 
@@ -228,7 +246,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 
 ```bash
 cd backend
-python -m pytest -q          # 43 个用例: 台账 CRUD/级联、录入与超标判定、标注规则、查询统计与导出、元数据接口
+python -m pytest -q          # 53 个用例: 台账 CRUD/级联、录入与超标判定、标注规则、数据质量标记、查询统计与导出、元数据接口
 
 cd frontend
 npm run build                # 生产构建校验
